@@ -428,6 +428,7 @@ model ImportBatch {
   importedCount   Int          @default(0)
   skippedCount    Int          @default(0)
   status          ImportStatus @default(PENDING)
+  previewData     Json?
   createdByUserId String?
   createdBy       User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   createdAt       DateTime     @default(now())
