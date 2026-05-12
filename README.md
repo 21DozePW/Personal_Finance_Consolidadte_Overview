@@ -27,6 +27,46 @@ only, CHF-consolidated multi-currency reporting.
 - Vitest (unit + integration) · Playwright (e2e)
 - Vercel (app) + Neon (Postgres) · Vercel Cron for daily FX fetch
 
+## Deploying to Vercel
+
+Vercel builds fail by default for Prisma projects because the generated
+client isn't on disk. The `postinstall` script in this repo runs
+`prisma generate` after dependency install so the build can find the
+client without any extra configuration.
+
+Setup checklist (one-time):
+
+1. Provision a Postgres database (Neon free tier works).
+2. Import the repo into Vercel; framework auto-detects as Next.js.
+3. In the Vercel project's **Settings → Environment Variables**, add:
+   - `DATABASE_URL` (pooled connection string)
+   - `DIRECT_URL` (unpooled connection string, same DB)
+   - `AUTH_SECRET` — `openssl rand -base64 32`
+   - `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` — from Google Cloud Console
+   - `AUTH_TRUST_HOST` = `true`
+   - `FIELD_ENCRYPTION_KEY` — `openssl rand -base64 32`
+   - `CRON_SHARED_SECRET` — `openssl rand -hex 32`
+   - `ADMIN_BOOTSTRAP_EMAIL` — your email
+   - `APP_BASE_URL` — `https://<your-domain>`
+   - `BASE_CURRENCY` = `CHF`
+   - `TRACKED_CURRENCIES` = `CHF,USD,EUR,BRL`
+4. (Optional but recommended) Set the project's **Build Command** to
+   `npm run vercel-build` so migrations run on every deploy.
+5. Deploy. After the first successful deploy run the seed once from
+   your machine: `npm run prisma:seed` (against the production DB) to
+   bootstrap the Admin allow-list.
+6. In Google Cloud Console, add `https://<your-domain>/api/auth/callback/google`
+   as an authorized OAuth redirect URI.
+
+If a deploy fails:
+- **Build log mentions `@prisma/client did not initialize`** → make sure the
+  `postinstall` script ran (Vercel disables `postinstall` if `NPM_CONFIG_IGNORE_SCRIPTS`
+  is set; it shouldn't be by default).
+- **Build log mentions React 19 RC peer warnings** → harmless; the `.npmrc`
+  sets `legacy-peer-deps=true`.
+- **Build crashes inside `prisma migrate deploy`** → `DATABASE_URL` /
+  `DIRECT_URL` are wrong, missing, or the DB is unreachable.
+
 ## Quick start
 
 ```bash
