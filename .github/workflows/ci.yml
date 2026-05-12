@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Dummy connection string so `prisma generate` and `prisma migrate diff`
+  # succeed in CI without a real Postgres instance for non-DB jobs.
+  DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/household_finance?schema=public"
+  DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/household_finance?schema=public"
+  ADMIN_BOOTSTRAP_EMAIL: "ci@example.com"
+  BASE_CURRENCY: "CHF"
+  TRACKED_CURRENCIES: "CHF,BRL,USD,EUR"
+
+jobs:
+  lint-typecheck-test:
+    name: Lint · Typecheck · Unit tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: household_finance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Apply migrations (deploy)
+        run: npm run prisma:deploy
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

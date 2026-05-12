@@ -1,0 +1,454 @@
+// Household Financial Management — Prisma schema (v1)
+//
+// Money is stored as integers in minor units (e.g. centimes for CHF) on
+// `*Minor` fields. FX rates use Decimal(18, 8). All sensitive free-text
+// columns (account aliases that might leak institution data, account
+// numbers, notes, transaction descriptions) are application-encrypted at
+// rest — they appear here as opaque `*Encrypted` String fields.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Users & access control
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  googleSub    String   @unique
+  email        String   @unique
+  displayName  String
+  avatarUrl    String?
+  role         UserRole @default(MEMBER)
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  invitedAllowedEmails AllowedEmail[] @relation("InvitedBy")
+  consumedAllowedEmail AllowedEmail?  @relation("ConsumedBy")
+  auditLogs            AuditLog[]
+  balancesCreated      AccountBalance[]
+  transactionsCreated  Transaction[]
+  importBatches        ImportBatch[]
+  importProfiles       ImportProfile[]
+  scenarios            ForecastScenario[]
+
+  @@index([email])
+}
+
+model AllowedEmail {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  intendedRole      UserRole  @default(MEMBER)
+  invitedByUserId   String?
+  invitedBy         User?     @relation("InvitedBy", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+  consumedByUserId  String?   @unique
+  consumedBy        User?     @relation("ConsumedBy", fields: [consumedByUserId], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Institutions & accounts
+// ---------------------------------------------------------------------------
+
+enum InstitutionType {
+  BANK
+  BROKERAGE
+  LENDER
+  LEASING_CO
+  OTHER
+}
+
+enum AccountKind {
+  CHECKING
+  SAVINGS
+  INVESTMENT
+  CREDIT_CARD
+  LOAN
+  LEASE
+  MORTGAGE
+  CASH
+  OTHER_ASSET
+  OTHER_LIABILITY
+}
+
+model Institution {
+  id        String           @id @default(cuid())
+  name      String
+  type      InstitutionType
+  country   String?
+  website   String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  accounts       Account[]
+  importProfiles ImportProfile[]
+}
+
+model Account {
+  id                 String      @id @default(cuid())
+  institutionId      String
+  institution        Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  alias              String
+  accountKind        AccountKind
+  currency           String      @default("CHF") // ISO 4217
+  lastFourEncrypted  String?
+  notesEncrypted     String?
+  openedAt           DateTime?
+  closedAt           DateTime?
+  isActive           Boolean     @default(true)
+  displayOrder       Int         @default(0)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  balances            AccountBalance[]
+  transactions        Transaction[]
+  loanTerms           LoanTerms?
+  recurringCommitments RecurringCommitment[]
+  importBatches       ImportBatch[]
+  goalsLinked         Goal[]
+
+  @@index([institutionId])
+  @@index([currency])
+  @@index([isActive])
+}
+
+enum BalanceSource {
+  MANUAL
+  CSV_IMPORT
+  COMPUTED
+  API
+}
+
+model AccountBalance {
+  id              String         @id @default(cuid())
+  accountId       String
+  account         Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  asOfDate        DateTime       @db.Date
+  balanceMinor    BigInt
+  fxRateToBase    Decimal?       @db.Decimal(18, 8)
+  source          BalanceSource  @default(MANUAL)
+  createdByUserId String?
+  createdBy       User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+
+  @@unique([accountId, asOfDate])
+  @@index([accountId, asOfDate(sort: Desc)])
+}
+
+enum TransactionSource {
+  MANUAL
+  CSV_IMPORT
+  API
+}
+
+model Transaction {
+  id                   String            @id @default(cuid())
+  accountId            String
+  account              Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  occurredOn           DateTime          @db.Date
+  postedOn             DateTime?         @db.Date
+  amountMinor          BigInt            // signed; negative = outflow
+  currency             String            // denormalized from account at insert time
+  fxRateToBase         Decimal?          @db.Decimal(18, 8)
+  descriptionEncrypted String?
+  merchantNormalized   String?
+  categoryId           String?
+  category             Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  isTransfer           Boolean           @default(false)
+  transferPairId       String?           @unique
+  transferPair         Transaction?      @relation("TransferPair", fields: [transferPairId], references: [id], onDelete: SetNull)
+  transferPairOf       Transaction?      @relation("TransferPair")
+  source               TransactionSource @default(MANUAL)
+  externalId           String?
+  importBatchId        String?
+  importBatch          ImportBatch?      @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdByUserId      String?
+  createdBy            User?             @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@unique([accountId, externalId])
+  @@index([accountId, occurredOn])
+  @@index([categoryId])
+  @@index([merchantNormalized])
+}
+
+// ---------------------------------------------------------------------------
+// Liabilities (loans, leases, mortgages)
+// ---------------------------------------------------------------------------
+
+model LoanTerms {
+  id                     String   @id @default(cuid())
+  accountId              String   @unique
+  account                Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  principalMinor         BigInt
+  interestRatePctBps     Int      // basis points * 100 (4.25% = 42500)
+  termMonths             Int
+  startDate              DateTime @db.Date
+  endDate                DateTime @db.Date
+  monthlyPaymentMinor    BigInt
+  paymentDayOfMonth      Int
+  remainingBalanceMinor  BigInt
+  payoffDate             DateTime? @db.Date
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Categories, budgets, recurring commitments
+// ---------------------------------------------------------------------------
+
+enum CategoryKind {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+model Category {
+  id               String       @id @default(cuid())
+  name             String
+  parentCategoryId String?
+  parent           Category?    @relation("CategoryToChildren", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  children         Category[]   @relation("CategoryToChildren")
+  kind             CategoryKind
+  color            String?
+  icon             String?
+  isArchived       Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  transactions         Transaction[]
+  budgetLines          BudgetLine[]
+  recurringCommitments RecurringCommitment[]
+
+  @@unique([name, parentCategoryId])
+  @@index([kind])
+}
+
+enum BudgetPeriodKind {
+  MONTHLY
+  ANNUAL
+}
+
+model Budget {
+  id         String           @id @default(cuid())
+  name       String
+  currency   String           @default("CHF")
+  periodKind BudgetPeriodKind @default(MONTHLY)
+  startMonth String           // YYYY-MM
+  endMonth   String?          // YYYY-MM, null = open-ended
+  isActive   Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  lines BudgetLine[]
+}
+
+model BudgetLine {
+  id                 String   @id @default(cuid())
+  budgetId           String
+  budget             Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  categoryId         String
+  category           Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  plannedAmountMinor BigInt
+  month              String   // YYYY-MM
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([budgetId, categoryId, month])
+  @@index([month])
+}
+
+enum RecurringCadence {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  CUSTOM
+}
+
+enum RecurringKind {
+  INCOME
+  EXPENSE
+  LOAN_PAYMENT
+  LEASE_PAYMENT
+  SUBSCRIPTION
+}
+
+model RecurringCommitment {
+  id              String           @id @default(cuid())
+  name            String
+  categoryId      String?
+  category        Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  accountId       String
+  account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  amountMinor     BigInt
+  currency        String
+  cadence         RecurringCadence
+  dayRule         String?          // e.g. "day 1", "last business day"
+  nextDueDate     DateTime         @db.Date
+  endDate         DateTime?        @db.Date
+  kind            RecurringKind
+  notesEncrypted  String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([accountId])
+  @@index([nextDueDate])
+}
+
+// ---------------------------------------------------------------------------
+// Goals & forecasts
+// ---------------------------------------------------------------------------
+
+enum GoalKind {
+  SAVINGS
+  DEBT_PAYOFF
+  EMERGENCY_FUND
+  OTHER
+}
+
+model Goal {
+  id                       String   @id @default(cuid())
+  name                     String
+  kind                     GoalKind
+  currency                 String   @default("CHF")
+  targetAmountMinor        BigInt
+  targetDate               DateTime @db.Date
+  linkedAccountId          String?
+  linkedAccount            Account? @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  currentAmountMinor       BigInt   @default(0)
+  monthlyContributionMinor BigInt   @default(0)
+  priority                 Int      @default(0)
+  isArchived               Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([isArchived, priority])
+}
+
+model ForecastScenario {
+  id              String   @id @default(cuid())
+  name            String
+  assumptions     Json
+  createdByUserId String?
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  isBaseline      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// FX rates
+// ---------------------------------------------------------------------------
+
+enum FxSource {
+  EXCHANGERATE_HOST
+  FRANKFURTER
+  MANUAL
+}
+
+model FxRate {
+  id            String   @id @default(cuid())
+  baseCurrency  String   // always "CHF" in v1
+  quoteCurrency String
+  rate          Decimal  @db.Decimal(18, 8) // units of quote per 1 base
+  asOfDate      DateTime @db.Date
+  source        FxSource
+  fetchedAt     DateTime @default(now())
+
+  @@unique([baseCurrency, quoteCurrency, asOfDate])
+  @@index([quoteCurrency, asOfDate(sort: Desc)])
+}
+
+enum FxFetchStatus {
+  OK
+  PARTIAL
+  FAIL
+}
+
+model FxRateFetchLog {
+  id                String        @id @default(cuid())
+  runAt             DateTime      @default(now())
+  status            FxFetchStatus
+  currenciesFetched Json
+  errorMessage      String?
+}
+
+// ---------------------------------------------------------------------------
+// Imports
+// ---------------------------------------------------------------------------
+
+enum ImportStatus {
+  PENDING
+  COMMITTED
+  REVERTED
+  FAILED
+}
+
+model ImportBatch {
+  id              String       @id @default(cuid())
+  accountId       String
+  account         Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  fileName        String
+  fileHash        String
+  rowCount        Int
+  importedCount   Int          @default(0)
+  skippedCount    Int          @default(0)
+  status          ImportStatus @default(PENDING)
+  createdByUserId String?
+  createdBy       User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  transactions Transaction[]
+
+  @@index([accountId, createdAt])
+  @@index([fileHash])
+}
+
+model ImportProfile {
+  id               String      @id @default(cuid())
+  institutionId    String
+  institution      Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  name             String
+  columnMap        Json
+  dateFormat       String
+  decimalSeparator String
+  createdByUserId  String?
+  createdBy        User?       @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@unique([institutionId, name])
+}
