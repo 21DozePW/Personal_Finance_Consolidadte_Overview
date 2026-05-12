@@ -3,9 +3,12 @@
 Private household financial management web app. Two named users, Google OAuth
 only, CHF-consolidated multi-currency reporting.
 
-> **Status:** Phase 0 — scaffolding only. No auth, no UI features, no data
-> flow yet. The full data model is in `prisma/schema.prisma`; subsequent
-> phases wire it up.
+> **Status:** Phase 1 complete — Google OAuth with allow-list enforcement,
+> role-based route guards (server + Edge middleware), nav, sign-in flow, and
+> the admin "Allowed emails" page (invite + revoke, with audit logging).
+> Accounts, balances, transactions, FX, budgets, goals, and forecasts arrive
+> in subsequent phases. The full data model is already in
+> `prisma/schema.prisma`.
 
 ## What this is (and isn't)
 
@@ -19,9 +22,9 @@ only, CHF-consolidated multi-currency reporting.
 
 - Next.js 15 (App Router) · TypeScript · Tailwind CSS · shadcn/ui
 - PostgreSQL · Prisma 5
-- Auth.js v5 (Google provider) — Phase 1
-- Zod · React Hook Form · TanStack Query — Phase 1+
-- Vitest (unit) · Playwright (e2e)
+- Auth.js v5 (Google provider) — JWT sessions, allow-list enforcement
+- Zod (validation) · React Hook Form · TanStack Query — Phase 3+
+- Vitest (unit + integration) · Playwright (e2e)
 - Vercel (app) + Neon (Postgres) · Vercel Cron for daily FX fetch
 
 ## Quick start
@@ -83,8 +86,38 @@ See [SECURITY.md](./SECURITY.md). Highlights: Google OAuth only, allow-list
 enforcement, AES-256-GCM field encryption for sensitive columns, no inline
 scripts, no third-party trackers, full audit log of structural changes.
 
+## Auth model (Phase 1)
+
+- **Google OAuth only.** No password sign-in.
+- **Allow-list.** Sign-in is rejected unless the Google email is present in
+  the `AllowedEmail` table. The error page is intentionally generic so no
+  account-enumeration is possible.
+- **First sign-in** consumes the invitation, creates a `User` with the
+  invited role, and stamps `lastLoginAt`.
+- **JWT sessions** with 30-day rolling expiry, 1-day refresh.
+- **Edge middleware** gates every non-public route via the JWT cookie.
+- **Server guards** (`requireSession`, `requireAdmin`, `requireApiAdmin`)
+  re-check `User.isActive` on every request so revoked members are locked
+  out immediately, not when their cookie eventually expires.
+- **Revocation** deletes the `AllowedEmail` row and marks the linked `User`
+  inactive. The last active Admin cannot be revoked.
+
+The Google OAuth redirect URI to register in Google Cloud is:
+
+```
+https://<your-domain>/api/auth/callback/google
+```
+
+For local development add `http://localhost:3000/api/auth/callback/google`
+as an authorized redirect URI on the same OAuth client.
+
 ## Build phases
 
-The product is delivered in incremental phases (see the spec). Phase 0 ends
-here: the project compiles, lints, typechecks, runs unit tests, and the
-Prisma schema covers the full data model. Phase 1 wires up authentication.
+The product is delivered in incremental phases (see the spec). The phase log:
+
+- **Phase 0 — Foundations.** Project compiles, lints, typechecks, unit tests
+  pass; Prisma schema covers the full v1 data model.
+- **Phase 1 — Auth & skeleton.** Google sign-in, allow-list enforcement,
+  role-based routing, admin "Allowed emails" page with audit logging.
+- **Phase 2+** — Accounts, balances, transactions, FX, budgets, goals,
+  forecasts, hardening.

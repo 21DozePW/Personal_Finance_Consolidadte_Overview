@@ -11,13 +11,20 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Dummy connection string so `prisma generate` and `prisma migrate diff`
-  # succeed in CI without a real Postgres instance for non-DB jobs.
   DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/household_finance?schema=public"
   DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/household_finance?schema=public"
   ADMIN_BOOTSTRAP_EMAIL: "ci@example.com"
   BASE_CURRENCY: "CHF"
   TRACKED_CURRENCIES: "CHF,BRL,USD,EUR"
+  # Dummy auth + encryption secrets so `next build` and unit tests don't fail
+  # at import time. Real secrets live in Vercel for production.
+  AUTH_SECRET: "ci-only-dummy-secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  AUTH_GOOGLE_ID: "ci-dummy-google-id"
+  AUTH_GOOGLE_SECRET: "ci-dummy-google-secret"
+  AUTH_TRUST_HOST: "true"
+  FIELD_ENCRYPTION_KEY: "ci-only-dummy-field-key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa="
+  CRON_SHARED_SECRET: "ci-dummy-cron-secret"
+  APP_BASE_URL: "http://localhost:3000"
 
 jobs:
   lint-typecheck-test:
