@@ -21,11 +21,51 @@ export function fromMinor(minor: number, currency: string): number {
   return minor / 10 ** digits;
 }
 
-export function formatMoney(minor: number, currency: string, locale = "de-CH"): string {
+export function formatMoney(minor: number | bigint, currency: string, locale = "de-CH"): string {
+  const value = typeof minor === "bigint" ? Number(minor) : minor;
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
     minimumFractionDigits: fractionDigits(currency),
     maximumFractionDigits: fractionDigits(currency),
-  }).format(fromMinor(minor, currency));
+  }).format(fromMinor(value, currency));
+}
+
+/**
+ * Parses a user-typed decimal string ("1234.56", "-1234,56") into a bigint of
+ * minor units for the given currency. Accepts `.` or `,` as the decimal
+ * separator and allows a leading "-" for outflows.
+ *
+ * Throws `ParseAmountError` on malformed input or more fractional digits than
+ * the currency supports.
+ */
+export class ParseAmountError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ParseAmountError";
+  }
+}
+
+export function parseAmountToMinor(raw: string, currency: string): bigint {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new ParseAmountError("Amount is required.");
+  const normalized = trimmed.replace(",", ".");
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
+    throw new ParseAmountError("Enter a number like 1234.56 or -42.");
+  }
+  const [whole, frac = ""] = normalized.split(".") as [string, string?];
+  const digits = fractionDigits(currency);
+  if (frac.length > digits) {
+    throw new ParseAmountError(
+      digits === 0
+        ? `${currency} amounts must be whole numbers.`
+        : `${currency} amounts allow at most ${digits} decimal places.`,
+    );
+  }
+  const padded = (frac ?? "").padEnd(digits, "0");
+  const negative = whole.startsWith("-");
+  const wholeAbs = negative ? whole.slice(1) : whole;
+  const combined = `${wholeAbs}${padded}`.replace(/^0+(?=\d)/, "");
+  const minor = BigInt(combined || "0");
+  return negative ? -minor : minor;
 }

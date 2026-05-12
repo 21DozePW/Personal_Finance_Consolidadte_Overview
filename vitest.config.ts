@@ -7,6 +7,9 @@ export default defineConfig({
     include: ["tests/unit/**/*.{test,spec}.{ts,tsx}", "src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules", ".next", "tests/e2e/**"],
     globals: false,
+    // Integration suites share a single Postgres instance; running test files
+    // in parallel races on DELETE / FK constraints. Serialize them.
+    fileParallelism: false,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
