@@ -13,6 +13,8 @@ import { prisma } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { decryptField, encryptField } from "@/lib/encryption";
 import { isAssetKind } from "@/lib/account-kinds";
+import { BASE_CURRENCY } from "@/lib/fx";
+import { backfillCurrency } from "@/server/fx";
 import { createAccountSchema, updateAccountSchema } from "@/schemas/account";
 
 export class AccountError extends Error {
@@ -109,7 +111,28 @@ export async function createAccount(actorUserId: string, raw: unknown) {
       displayOrder: created.displayOrder,
     },
   });
+
+  // First time we see a foreign currency, kick off a 365-day backfill so
+  // historical balance / transaction views work immediately. Failures here
+  // never block account creation — they're logged in FxRateFetchLog at the
+  // orchestration layer.
+  await maybeBackfillNewCurrency(input.currency);
+
   return decorate(created);
+}
+
+async function maybeBackfillNewCurrency(currency: string): Promise<void> {
+  if (currency === BASE_CURRENCY) return;
+  const existing = await prisma.fxRate.findFirst({
+    where: { baseCurrency: BASE_CURRENCY, quoteCurrency: currency },
+    select: { id: true },
+  });
+  if (existing) return;
+  try {
+    await backfillCurrency(currency, { days: 365 });
+  } catch {
+    // Swallow — account creation must not fail because FX is unreachable.
+  }
 }
 
 export async function updateAccount(actorUserId: string, id: string, raw: unknown) {

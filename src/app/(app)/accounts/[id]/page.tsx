@@ -3,12 +3,14 @@ import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { getAccount } from "@/server/accounts";
 import { listBalances } from "@/server/balances";
+import { getLatestRateLookup, getRateForDate } from "@/server/fx";
 import { requireSession } from "@/server/auth-guards";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ACCOUNT_KIND_LABEL } from "@/lib/account-kinds";
 import { formatMoney } from "@/lib/money";
+import { BASE_CURRENCY, convertToBaseMinor } from "@/lib/fx";
 import { UpdateBalanceForm } from "./update-balance-form";
 import { AccountAdminActions } from "./account-admin-actions";
 
@@ -26,6 +28,33 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   const latest = balances[0];
   const todayIso = new Date().toISOString().slice(0, 10);
   const isAdmin = session.user.role === "ADMIN";
+  const isForeign = account.currency !== BASE_CURRENCY;
+
+  // Latest rate for the "current balance" tile.
+  const latestLookup = await getLatestRateLookup([account.currency]);
+  const latestChfMinor = latest
+    ? convertToBaseMinor(latest.balanceMinor, account.currency, latestLookup(account.currency))
+    : null;
+
+  // For the history table: each row uses the rate captured for its own date
+  // (carry-forward when there's a gap). One query per distinct date — fine
+  // for 24 rows.
+  const historyChf = isForeign
+    ? await Promise.all(
+        balances.map(async (b) => {
+          const rateRow = await getRateForDate(account.currency, b.asOfDate);
+          const rate = rateRow ? Number(rateRow.rate) : null;
+          return {
+            id: b.id,
+            chfMinor: convertToBaseMinor(b.balanceMinor, account.currency, rate),
+            rate,
+          };
+        }),
+      )
+    : null;
+  const historyChfMap = new Map<string, { chfMinor: number | null; rate: number | null }>(
+    (historyChf ?? []).map((r) => [r.id, { chfMinor: r.chfMinor, rate: r.rate }]),
+  );
 
   return (
     <div className="space-y-6">
@@ -63,6 +92,13 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
             <CardTitle className="text-3xl tabular-nums">
               {latest ? formatMoney(latest.balanceMinor, account.currency) : "—"}
             </CardTitle>
+            {isForeign && latest ? (
+              <div className="text-sm tabular-nums text-muted-foreground">
+                {latestChfMinor == null
+                  ? "≈ no FX rate"
+                  : `≈ ${formatMoney(latestChfMinor, BASE_CURRENCY)}`}
+              </div>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-1 text-xs text-muted-foreground">
             {latest ? (
@@ -97,7 +133,12 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
       <Card>
         <CardHeader>
           <CardTitle>Balance history</CardTitle>
-          <CardDescription>Last {balances.length} entries.</CardDescription>
+          <CardDescription>
+            Last {balances.length} entries.
+            {isForeign
+              ? ` ${BASE_CURRENCY} equivalent uses the FX rate captured for each date.`
+              : ""}
+          </CardDescription>
         </CardHeader>
         <CardContent className="px-0 pb-0">
           {balances.length === 0 ? (
@@ -108,21 +149,34 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
                 <tr>
                   <th className="px-5 py-2 text-left font-medium">Date</th>
                   <th className="px-5 py-2 text-right font-medium">Balance</th>
+                  {isForeign ? (
+                    <th className="px-5 py-2 text-right font-medium">≈ {BASE_CURRENCY}</th>
+                  ) : null}
                   <th className="px-5 py-2 text-left font-medium">Source</th>
                 </tr>
               </thead>
               <tbody>
-                {balances.map((b) => (
-                  <tr key={b.id} className="border-b last:border-b-0">
-                    <td className="px-5 py-2">{dateFmt.format(b.asOfDate)}</td>
-                    <td className="px-5 py-2 text-right tabular-nums">
-                      {formatMoney(b.balanceMinor, account.currency)}
-                    </td>
-                    <td className="px-5 py-2 text-xs uppercase text-muted-foreground">
-                      {b.source.toLowerCase()}
-                    </td>
-                  </tr>
-                ))}
+                {balances.map((b) => {
+                  const chf = historyChfMap.get(b.id);
+                  return (
+                    <tr key={b.id} className="border-b last:border-b-0">
+                      <td className="px-5 py-2">{dateFmt.format(b.asOfDate)}</td>
+                      <td className="px-5 py-2 text-right tabular-nums">
+                        {formatMoney(b.balanceMinor, account.currency)}
+                      </td>
+                      {isForeign ? (
+                        <td className="px-5 py-2 text-right tabular-nums text-muted-foreground">
+                          {!chf || chf.chfMinor == null
+                            ? "—"
+                            : formatMoney(chf.chfMinor, BASE_CURRENCY)}
+                        </td>
+                      ) : null}
+                      <td className="px-5 py-2 text-xs uppercase text-muted-foreground">
+                        {b.source.toLowerCase()}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
