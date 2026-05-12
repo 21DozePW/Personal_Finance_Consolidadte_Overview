@@ -39,8 +39,7 @@ Setup checklist (one-time):
 1. Provision a Postgres database (Neon free tier works).
 2. Import the repo into Vercel; framework auto-detects as Next.js.
 3. In the Vercel project's **Settings → Environment Variables**, add:
-   - `DATABASE_URL` (pooled connection string)
-   - `DIRECT_URL` (unpooled connection string, same DB)
+   - `DATABASE_URL` (full Postgres connection string)
    - `AUTH_SECRET` — `openssl rand -base64 32`
    - `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` — from Google Cloud Console
    - `AUTH_TRUST_HOST` = `true`
@@ -64,8 +63,11 @@ If a deploy fails:
   is set; it shouldn't be by default).
 - **Build log mentions React 19 RC peer warnings** → harmless; the `.npmrc`
   sets `legacy-peer-deps=true`.
-- **Build crashes inside `prisma migrate deploy`** → `DATABASE_URL` /
-  `DIRECT_URL` are wrong, missing, or the DB is unreachable.
+- **Build crashes inside `prisma migrate deploy`** → `DATABASE_URL` is
+  wrong, missing, or the DB is unreachable. If the pooled connection
+  string can't run migrations (Neon's PgBouncer pooler, for instance),
+  uncomment `directUrl = env("DIRECT_URL")` in `prisma/schema.prisma`
+  and set `DIRECT_URL` to the unpooled endpoint.
 
 ## Quick start
 

@@ -10,10 +10,15 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// `DIRECT_URL` is optional: if your DATABASE_URL is a pooled connection that
+// can't run migrations (e.g. Neon's pooler in PgBouncer mode), set
+// DIRECT_URL to the unpooled connection and uncomment the directUrl line
+// below. For most setups (including Neon's default endpoint) DATABASE_URL
+// alone is sufficient.
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
