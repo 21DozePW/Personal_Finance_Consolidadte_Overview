@@ -3,8 +3,10 @@ import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { getAccount } from "@/server/accounts";
 import { listBalances } from "@/server/balances";
+import { getLoanTermsByAccount } from "@/server/loan-terms";
 import { getLatestRateLookup, getRateForDate } from "@/server/fx";
 import { requireSession } from "@/server/auth-guards";
+import { bpsToPctString } from "@/schemas/loan-terms";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +31,11 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   const todayIso = new Date().toISOString().slice(0, 10);
   const isAdmin = session.user.role === "ADMIN";
   const isForeign = account.currency !== BASE_CURRENCY;
+  const isLoanKind =
+    account.accountKind === "LOAN" ||
+    account.accountKind === "LEASE" ||
+    account.accountKind === "MORTGAGE";
+  const loanTerms = isLoanKind ? await getLoanTermsByAccount(id) : null;
 
   // Latest rate for the "current balance" tile.
   const latestLookup = await getLatestRateLookup([account.currency]);
@@ -130,6 +137,43 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
         </Card>
       </div>
 
+      {isLoanKind ? (
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle>Loan terms</CardTitle>
+              <CardDescription>
+                {loanTerms
+                  ? "Amortization schedule, payoff calculator, and the auto-generated monthly payment commitment."
+                  : "Add the principal, interest rate, and term to unlock the amortization schedule and payoff calculator."}
+              </CardDescription>
+            </div>
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/accounts/${account.id}/loan-terms` as Route}>
+                {loanTerms ? "View" : "Add"}
+              </Link>
+            </Button>
+          </CardHeader>
+          {loanTerms ? (
+            <CardContent className="grid gap-3 sm:grid-cols-4">
+              <Stat
+                label="Remaining"
+                value={formatMoney(loanTerms.remainingBalanceMinor, account.currency)}
+              />
+              <Stat
+                label="Monthly payment"
+                value={formatMoney(loanTerms.monthlyPaymentMinor, account.currency)}
+              />
+              <Stat label="Rate" value={`${bpsToPctString(loanTerms.interestRatePctBps)}%`} />
+              <Stat
+                label="Payoff date"
+                value={loanTerms.payoffDate ? dateFmt.format(loanTerms.payoffDate) : "—"}
+              />
+            </CardContent>
+          ) : null}
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Balance history</CardTitle>
@@ -205,6 +249,15 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-card px-4 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
