@@ -5,6 +5,7 @@ import { requireAdmin } from "@/server/auth-guards";
 const TABS: Array<{ href: Route; label: string }> = [
   { href: "/admin/users", label: "Allowed emails" },
   { href: "/admin/institutions", label: "Institutions" },
+  { href: "/admin/categories", label: "Categories" },
   { href: "/admin/fx", label: "FX rates" },
 ];
 

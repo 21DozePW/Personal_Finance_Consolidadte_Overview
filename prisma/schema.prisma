@@ -188,6 +188,7 @@ model Transaction {
   transferPairId       String?           @unique
   transferPair         Transaction?      @relation("TransferPair", fields: [transferPairId], references: [id], onDelete: SetNull)
   transferPairOf       Transaction?      @relation("TransferPair")
+  splitGroupId         String?
   source               TransactionSource @default(MANUAL)
   externalId           String?
   importBatchId        String?
@@ -201,6 +202,7 @@ model Transaction {
   @@index([accountId, occurredOn])
   @@index([categoryId])
   @@index([merchantNormalized])
+  @@index([splitGroupId])
 }
 
 // ---------------------------------------------------------------------------
