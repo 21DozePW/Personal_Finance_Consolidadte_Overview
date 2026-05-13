@@ -281,16 +281,23 @@ model Budget {
   lines BudgetLine[]
 }
 
+enum BudgetCarryOverRule {
+  RESET
+  ROLLOVER_SURPLUS
+  ACCUMULATE
+}
+
 model BudgetLine {
-  id                 String   @id @default(cuid())
+  id                 String              @id @default(cuid())
   budgetId           String
-  budget             Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  budget             Budget              @relation(fields: [budgetId], references: [id], onDelete: Cascade)
   categoryId         String
-  category           Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   plannedAmountMinor BigInt
-  month              String   // YYYY-MM
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  month              String              // YYYY-MM
+  carryOverRule      BudgetCarryOverRule @default(RESET)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@unique([budgetId, categoryId, month])
   @@index([month])
