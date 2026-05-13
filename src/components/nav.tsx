@@ -15,6 +15,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/recurring", label: "Recurring" },
   { href: "/budgets", label: "Budgets" },
   { href: "/goals", label: "Goals" },
+  { href: "/forecasts", label: "Forecasts" },
   { href: "/admin/users", label: "Admin", adminOnly: true },
 ];
 
