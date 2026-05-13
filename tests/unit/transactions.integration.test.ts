@@ -63,6 +63,11 @@ afterAll(async () => {
 
 async function reset() {
   await prisma.auditLog.deleteMany({});
+  await prisma.goal.deleteMany({});
+  await prisma.budgetLine.deleteMany({});
+  await prisma.budget.deleteMany({});
+  await prisma.recurringCommitment.deleteMany({});
+  await prisma.loanTerms.deleteMany({});
   await prisma.transaction.deleteMany({});
   await prisma.accountBalance.deleteMany({});
   await prisma.account.deleteMany({});
