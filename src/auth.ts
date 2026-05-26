@@ -24,7 +24,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const sub = profile?.sub;
       if (!email || !sub) return false;
 
-      const allowed = await prisma.allowedEmail.findUnique({ where: { email } });
+      let allowed = await prisma.allowedEmail.findUnique({ where: { email } });
+
+      // First-deploy self-bootstrap: the email in ADMIN_BOOTSTRAP_EMAIL is
+      // auto-allow-listed as ADMIN the first time it signs in, so a fresh
+      // deploy needs no manual seed step against the production database.
+      // Only fires when the allow-list is completely empty (no users yet),
+      // so it can't silently re-grant access after the owner revokes someone.
+      if (!allowed) {
+        const bootstrap = process.env.ADMIN_BOOTSTRAP_EMAIL?.toLowerCase().trim();
+        if (bootstrap && bootstrap === email) {
+          const userCount = await prisma.user.count();
+          if (userCount === 0) {
+            allowed = await prisma.allowedEmail.create({
+              data: { email, intendedRole: "ADMIN" },
+            });
+          }
+        }
+      }
       if (!allowed) return false;
 
       const existing = await prisma.user.findUnique({ where: { googleSub: sub } });
